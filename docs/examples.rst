@@ -27,7 +27,7 @@ It is up to the user to decide which method is more suitable for a given use cas
 **Generally, the first method will be sufficient for most use cases.**
 
 It is also worth noting that compiling all used templates using the second method might not be possible,
-depending one the project and board used, due to the limited amount of RAM.
+depending on the project and board used, due to the limited amount of RAM.
 
 .. literalinclude:: ../examples/templateengine_reusing.py
     :caption: examples/templateengine_reusing.py
@@ -51,7 +51,7 @@ Every expression that would be valid in an f-string is also valid in the templat
 This includes, but is not limited to:
 
 - mathemathical operations e.g. ``{{ 5 + 2 ** 3 }}`` will be replaced with ``"13"``
-- string operations e.g. ``{{ 'hello'.title() }}`` will be replaced with ``"Hello"``
+- string operations e.g. ``{{ 'hello'.upper() }}`` will be replaced with ``"HELLO"``
 - logical operations e.g. ``{{ 1 == 2 }}`` will be replaced with ``"False"``
 - ternary operator e.g. ``{{ 'ON' if True else 'OFF' }}`` will be replaced with ``"ON"``
 - built-in functions e.g. ``{{ len('Adafruit Industries') }}`` will be replaced with ``"19"``
@@ -140,13 +140,13 @@ and then include it in multiple pages.
 
 .. literalinclude:: ../examples/footer.html
     :caption: examples/footer.html
-    :lines: 5-
+    :lines: 7-
     :language: html
     :linenos:
 
 .. literalinclude:: ../examples/base_without_footer.html
     :caption: examples/base_without_footer.html
-    :lines: 5-
+    :lines: 7-
     :language: html
     :emphasize-lines: 12
     :linenos:
@@ -173,13 +173,13 @@ This allows sharing whole layout, not only single parts.
 
 .. literalinclude:: ../examples/child.html
     :caption: examples/child.html
-    :lines: 5-
+    :lines: 7-
     :language: html
     :linenos:
 
 .. literalinclude:: ../examples/parent_layout.html
     :caption: examples/parent_layout.html
-    :lines: 5-
+    :lines: 7-
     :language: html
     :linenos:
 
@@ -196,7 +196,7 @@ Executing Python code in templates
 ----------------------------------
 
 It is also possible to execute Python code in templates.
-This an be used for e.g. defining variables, modifying context, or breaking from loops.
+This can be used for e.g. defining variables, modifying context, or breaking from loops.
 
 
 .. literalinclude:: ../examples/templateengine_exec.py
@@ -221,7 +221,7 @@ Supported comment syntaxes:
 
 .. literalinclude:: ../examples/comments.html
     :caption: examples/comments.html
-    :lines: 5-
+    :lines: 7-
     :language: html
     :linenos:
 
@@ -247,12 +247,13 @@ and in all ``Template`` constructors.
 
 .. literalinclude:: ../examples/autoescape.html
     :caption: examples/autoescape.html
-    :lines: 5-
+    :lines: 7-
     :language: html
     :linenos:
 
 .. literalinclude:: ../examples/autoescape.md
     :caption: examples/autoescape.md
+    :lines: 5-
     :language: markdown
     :linenos:
 

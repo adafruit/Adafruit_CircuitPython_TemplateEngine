@@ -30,7 +30,7 @@ but it does not implement all of their features and takes a different approach t
 
 Main diffrences from Jinja2 and Django Templates:
 
-- filter are not supported, and there is no plan to support them
+- filters are not supported, and there is no plan to support them
 - all variables passed inside context must be accessed using the ``context`` object
 - you can call methods inside templates just like in Python
 - no support for nested blocks, although inheritance is supported

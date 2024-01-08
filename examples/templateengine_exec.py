@@ -16,7 +16,7 @@ template = r"""
         {% exec name = "jake" %}
         We defined a name: {{ name }}</br>
 
-        {% exec name = name.title() %}
+        {% exec name = (name[0].upper() + name[1:].lower()) if name else "" %}
         First letter was capitalized: {{ name }}</br>
 
         {% exec name = list(name) %}
@@ -26,8 +26,8 @@ template = r"""
         And reverse-sorted: {{ name }}</br>
 
         {% for letter in name %}
-            {% if letter!="a" %}
-                {% if letter=="k" %}
+            {% if letter != "a" %}
+                {% if letter == "k" %}
                     Skip a letter... e.g. "{{ letter }}"</br>
                     {% exec continue %}
                 {% endif %}

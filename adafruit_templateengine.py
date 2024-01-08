@@ -29,6 +29,18 @@ except ImportError:
 import os
 import re
 
+try:
+    from sys import implementation
+
+    if implementation.name == "circuitpython" and implementation.version < (9, 0, 0):
+        print(
+            "Warning: adafruit_templateengine requires CircuitPython 9.0.0, as previous versions"
+            " will have limited functionality when using block comments and non-ASCII characters."
+        )
+finally:
+    # Unimport sys to prevent accidental use
+    del implementation
+
 
 class Language:  # pylint: disable=too-few-public-methods
     """
@@ -59,12 +71,12 @@ def safe_html(value: Any) -> str:
         # 1e&minus;10
     """
 
-    def replace_amp_or_semi(match: re.Match):
+    def _replace_amp_or_semi(match: re.Match):
         return "&amp;" if match.group(0) == "&" else "&semi;"
 
     return (
         # Replace initial & and ; together
-        re.sub(r"&|;", replace_amp_or_semi, str(value))
+        re.sub(r"&|;", _replace_amp_or_semi, str(value))
         # Replace other characters
         .replace('"', "&quot;")
         .replace("_", "&lowbar;")
@@ -152,33 +164,34 @@ def safe_markdown(value: Any) -> str:
     )
 
 
-_PRECOMPILED_EXTENDS_PATTERN = re.compile(r"{% extends '.+?' %}|{% extends \".+?\" %}")
-_PRECOMPILED_BLOCK_PATTERN = re.compile(r"{% block \w+? %}")
-_PRECOMPILED_INCLUDE_PATTERN = re.compile(r"{% include '.+?' %}|{% include \".+?\" %}")
-_PRECOMPILED_HASH_COMMENT_PATTERN = re.compile(r"{# .+? #}")
-_PRECOMPILED_BLOCK_COMMENT_PATTERN = re.compile(
+_EXTENDS_PATTERN = re.compile(r"{% extends '.+?' %}|{% extends \".+?\" %}")
+_BLOCK_PATTERN = re.compile(r"{% block \w+? %}")
+_INCLUDE_PATTERN = re.compile(r"{% include '.+?' %}|{% include \".+?\" %}")
+_HASH_COMMENT_PATTERN = re.compile(r"{# .+? #}")
+_BLOCK_COMMENT_PATTERN = re.compile(
     r"{% comment ('.*?' |\".*?\" )?%}[\s\S]*?{% endcomment %}"
 )
-_PRECOMPILED_TOKEN_PATTERN = re.compile(r"{{ .+? }}|{% .+? %}")
+_TOKEN_PATTERN = re.compile(r"{{ .+? }}|{% .+? %}")
+_LSTRIP_BLOCK_PATTERN = re.compile(r"\n( )+$")
 
 
-def _find_next_extends(template: str):
-    return _PRECOMPILED_EXTENDS_PATTERN.search(template)
+def _find_extends(template: str):
+    return _EXTENDS_PATTERN.search(template)
 
 
-def _find_next_block(template: str):
-    return _PRECOMPILED_BLOCK_PATTERN.search(template)
+def _find_block(template: str):
+    return _BLOCK_PATTERN.search(template)
 
 
-def _find_next_include(template: str):
-    return _PRECOMPILED_INCLUDE_PATTERN.search(template)
+def _find_include(template: str):
+    return _INCLUDE_PATTERN.search(template)
 
 
 def _find_named_endblock(template: str, name: str):
     return re.search(r"{% endblock " + name + r" %}", template)
 
 
-def _exists_and_is_file(path: str):
+def _exists_and_is_file(path: str) -> bool:
     try:
         return (os.stat(path)[0] & 0b_11110000_00000000) == 0b_10000000_00000000
     except OSError:
@@ -186,13 +199,13 @@ def _exists_and_is_file(path: str):
 
 
 def _resolve_includes(template: str):
-    while (include_match := _find_next_include(template)) is not None:
+    while (include_match := _find_include(template)) is not None:
         template_path = include_match.group(0)[12:-4]
 
         # TODO: Restrict include to specific directory
 
         if not _exists_and_is_file(template_path):
-            raise FileNotFoundError(f"Include template not found: {template_path}")
+            raise OSError(f"Include template not found: {template_path}")
 
         # Replace the include with the template content
         with open(template_path, "rt", encoding="utf-8") as template_file:
@@ -205,7 +218,7 @@ def _resolve_includes(template: str):
 
 
 def _check_for_unsupported_nested_blocks(template: str):
-    if _find_next_block(template) is not None:
+    if _find_block(template) is not None:
         raise ValueError("Nested blocks are not supported")
 
 
@@ -213,7 +226,7 @@ def _resolve_includes_blocks_and_extends(template: str):
     block_replacements: "dict[str, str]" = {}
 
     # Processing nested child templates
-    while (extends_match := _find_next_extends(template)) is not None:
+    while (extends_match := _find_extends(template)) is not None:
         extended_template_name = extends_match.group(0)[12:-4]
 
         # Load extended template
@@ -229,7 +242,7 @@ def _resolve_includes_blocks_and_extends(template: str):
         template = _resolve_includes(template)
 
         # Save block replacements
-        while (block_match := _find_next_block(template)) is not None:
+        while (block_match := _find_block(template)) is not None:
             block_name = block_match.group(0)[9:-3]
 
             endblock_match = _find_named_endblock(template, block_name)
@@ -237,12 +250,7 @@ def _resolve_includes_blocks_and_extends(template: str):
             if endblock_match is None:
                 raise ValueError(r"Missing {% endblock %} for block: " + block_name)
 
-            # Workaround for bug in re module https://github.com/adafruit/circuitpython/issues/6860
-            block_content = template.encode("utf-8")[
-                block_match.end() : endblock_match.start()
-            ].decode("utf-8")
-            # TODO: Uncomment when bug is fixed
-            # block_content = template[block_match.end() : endblock_match.start()]
+            block_content = template[block_match.end() : endblock_match.start()]
 
             _check_for_unsupported_nested_blocks(block_content)
 
@@ -267,7 +275,7 @@ def _resolve_includes_blocks_and_extends(template: str):
 
 def _replace_blocks_with_replacements(template: str, replacements: "dict[str, str]"):
     # Replace blocks in top-level template
-    while (block_match := _find_next_block(template)) is not None:
+    while (block_match := _find_block(template)) is not None:
         block_name = block_match.group(0)[9:-3]
 
         # Self-closing block tag without default content
@@ -309,34 +317,61 @@ def _replace_blocks_with_replacements(template: str, replacements: "dict[str, st
     return template
 
 
-def _find_next_hash_comment(template: str):
-    return _PRECOMPILED_HASH_COMMENT_PATTERN.search(template)
+def _find_hash_comment(template: str):
+    return _HASH_COMMENT_PATTERN.search(template)
 
 
-def _find_next_block_comment(template: str):
-    return _PRECOMPILED_BLOCK_COMMENT_PATTERN.search(template)
+def _find_block_comment(template: str):
+    return _BLOCK_COMMENT_PATTERN.search(template)
 
 
-def _remove_comments(template: str):
+def _remove_comments(
+    template: str,
+    *,
+    trim_blocks: bool = True,
+    lstrip_blocks: bool = True,
+):
+    def _remove_matched_comment(template: str, comment_match: re.Match):
+        text_before_comment = template[: comment_match.start()]
+        text_after_comment = template[comment_match.end() :]
+
+        if text_before_comment:
+            if lstrip_blocks:
+                if _token_is_on_own_line(text_before_comment):
+                    text_before_comment = text_before_comment.rstrip(" ")
+
+        if text_after_comment:
+            if trim_blocks:
+                if text_after_comment.startswith("\n"):
+                    text_after_comment = text_after_comment[1:]
+
+        return text_before_comment + text_after_comment
+
     # Remove hash comments: {# ... #}
-    while (comment_match := _find_next_hash_comment(template)) is not None:
-        template = template[: comment_match.start()] + template[comment_match.end() :]
+    while (comment_match := _find_hash_comment(template)) is not None:
+        template = _remove_matched_comment(template, comment_match)
 
     # Remove block comments: {% comment %} ... {% endcomment %}
-    while (comment_match := _find_next_block_comment(template)) is not None:
-        template = template[: comment_match.start()] + template[comment_match.end() :]
+    while (comment_match := _find_block_comment(template)) is not None:
+        template = _remove_matched_comment(template, comment_match)
 
     return template
 
 
-def _find_next_token(template: str):
-    return _PRECOMPILED_TOKEN_PATTERN.search(template)
+def _find_token(template: str):
+    return _TOKEN_PATTERN.search(template)
+
+
+def _token_is_on_own_line(text_before_token: str) -> bool:
+    return _LSTRIP_BLOCK_PATTERN.search(text_before_token) is not None
 
 
 def _create_template_function(  # pylint: disable=,too-many-locals,too-many-branches,too-many-statements
     template: str,
     language: str = Language.HTML,
     *,
+    trim_blocks: bool = True,
+    lstrip_blocks: bool = True,
     function_name: str = "_",
     context_name: str = "context",
     dry_run: bool = False,
@@ -351,22 +386,34 @@ def _create_template_function(  # pylint: disable=,too-many-locals,too-many-bran
     function_string = f"def {function_name}({context_name}):\n"
     indent, indentation_level = "    ", 1
 
-    # Keep track of the tempalte state
+    # Keep track of the template state
     forloop_iterables: "list[str]" = []
     autoescape_modes: "list[bool]" = ["default_on"]
+    last_token_was_block = False
 
     # Resolve tokens
-    while (token_match := _find_next_token(template)) is not None:
+    while (token_match := _find_token(template)) is not None:
         token = token_match.group(0)
 
         # Add the text before the token
         if text_before_token := template[: token_match.start()]:
-            function_string += (
-                indent * indentation_level + f"yield {repr(text_before_token)}\n"
-            )
+            if lstrip_blocks and token.startswith(r"{% "):
+                if _token_is_on_own_line(text_before_token):
+                    text_before_token = text_before_token.rstrip(" ")
+
+            if trim_blocks:
+                if last_token_was_block and text_before_token.startswith("\n"):
+                    text_before_token = text_before_token[1:]
+
+            if text_before_token:
+                function_string += (
+                    indent * indentation_level + f"yield {repr(text_before_token)}\n"
+                )
 
         # Token is an expression
         if token.startswith(r"{{ "):
+            last_token_was_block = False
+
             autoescape = autoescape_modes[-1] in ("on", "default_on")
 
             # Expression should be escaped with language-specific function
@@ -383,6 +430,8 @@ def _create_template_function(  # pylint: disable=,too-many-locals,too-many-bran
 
         # Token is a statement
         elif token.startswith(r"{% "):
+            last_token_was_block = True
+
             # Token is a some sort of if statement
             if token.startswith(r"{% if "):
                 function_string += indent * indentation_level + f"{token[3:-3]}:\n"
@@ -449,9 +498,16 @@ def _create_template_function(  # pylint: disable=,too-many-locals,too-many-bran
         # Continue with the rest of the template
         template = template[token_match.end() :]
 
-    # Add the text after the last token (if any) and return
-    if template:
-        function_string += indent * indentation_level + f"yield {repr(template)}\n"
+    # Add the text after the last token (if any)
+    text_after_last_token = template
+
+    if text_after_last_token:
+        if trim_blocks and text_after_last_token.startswith("\n"):
+            text_after_last_token = text_after_last_token[1:]
+
+        function_string += (
+            indent * indentation_level + f"yield {repr(text_after_last_token)}\n"
+        )
 
     # If dry run, return the template function string
     if dry_run:
