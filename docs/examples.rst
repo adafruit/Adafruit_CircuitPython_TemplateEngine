@@ -9,30 +9,28 @@ This example is printing a basic HTML page with with a dynamic paragraph.
     :lines: 5-
     :linenos:
 
-Reusing templates
------------------
+Caching/Reusing templates
+-------------------------
 
-The are two main ways of rendering templates:
+The are two ways of rendering templates:
 
+- manually creating a ``Template`` or ``FileTemplate`` object and calling its method
 - using one of ``render_...`` methods
-- manually creating a ``Template`` object and calling its method
 
-While the first method is simpler, it also compiles the template on every call.
-The second method is more efficient when rendering the same template multiple times, as it allows
-to reuse the compiled template, at the cost of more memory usage.
 
-Both methods can be used interchangeably, as they both return the same result.
-It is up to the user to decide which method is more suitable for a given use case.
+By dafault, the ``render_...`` methods cache the template and reuse it on next calls.
+This speeds up the rendering process, but also uses more memory.
 
-**Generally, the first method will be sufficient for most use cases.**
+If for some reason the caching is not desired, you can disable it by passing ``cache=False`` to
+the ``render_...`` method. This will cause the template to be recreated on every call, which is slower,
+but uses less memory. This might be useful when rendering a large number of different templates that
+might not fit in the memory at the same time or are not used often enough to justify caching them.
 
-It is also worth noting that compiling all used templates using the second method might not be possible,
-depending on the project and board used, due to the limited amount of RAM.
 
 .. literalinclude:: ../examples/templateengine_reusing.py
     :caption: examples/templateengine_reusing.py
     :lines: 5-
-    :emphasize-lines: 1,16,20
+    :emphasize-lines: 22,27,34
     :linenos:
 
 Expressions
@@ -234,7 +232,7 @@ Autoescaping unsafe characters
 ------------------------------
 
 Token ``{% autoescape off %} ... {% endautoescape %}`` is used for marking a block of code that should
-be not be autoescaped. Consequently using ``{% autoescape off %} ...`` does the opposite and turns
+be not be autoescaped. Consequently using ``{% autoescape on %} ...`` does the opposite and turns
 the autoescaping back on.
 
 By default the template engine will escape all HTML-unsafe characters in expressions
@@ -242,19 +240,10 @@ By default the template engine will escape all HTML-unsafe characters in express
 
 Content outside expressions is not escaped and is rendered as-is.
 
-For escaping XML and Markdown, you can use the ``language=`` parameter, both in ``render_...`` methods
-and in all ``Template`` constructors.
-
 .. literalinclude:: ../examples/autoescape.html
     :caption: examples/autoescape.html
     :lines: 7-
     :language: html
-    :linenos:
-
-.. literalinclude:: ../examples/autoescape.md
-    :caption: examples/autoescape.md
-    :lines: 5-
-    :language: markdown
     :linenos:
 
 .. literalinclude:: ../examples/templateengine_autoescape.py

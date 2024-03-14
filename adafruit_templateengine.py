@@ -42,19 +42,94 @@ finally:
     del implementation
 
 
-class Language:  # pylint: disable=too-few-public-methods
-    """
-    Enum-like class that contains languages supported for escaping.
-    """
+class Token:  # pylint: disable=too-few-public-methods
+    """Stores a token with its position in a template."""
 
-    HTML = "html"
-    """HTML language"""
+    def __init__(self, template: str, start_position: int, end_position: int):
+        self.template = template
+        self.start_position = start_position
+        self.end_position = end_position
 
-    XML = "xml"
-    """XML language"""
+        self.content = template[start_position:end_position]
 
-    MARKDOWN = "markdown"
-    """Markdown language"""
+
+class TemplateNotFoundError(OSError):
+    """Raised when a template file is not found."""
+
+    def __init__(self, path: str):
+        """Specified template file that was not found."""
+        super().__init__(f"Template file not found: {path}")
+
+
+class TemplateSyntaxError(SyntaxError):
+    """Raised when a syntax error is encountered in a template."""
+
+    def __init__(self, token: Token, reason: str):
+        """Provided token is not a valid template syntax at the specified position."""
+        super().__init__(self._underline_token_in_template(token) + f"\n\n{reason}")
+
+    @staticmethod
+    def _skipped_lines_message(nr_of_lines: int) -> str:
+        return f"[{nr_of_lines} line{'s' if nr_of_lines > 1 else ''} skipped]"
+
+    @classmethod
+    def _underline_token_in_template(
+        cls, token: Token, *, lines_around: int = 4, symbol: str = "^"
+    ) -> str:
+        """
+        Return ``number_of_lines`` lines before and after ``token``, with the token content
+        underlined with ``symbol`` e.g.:
+
+        ```html
+        [8 lines skipped]
+                Shopping list:
+                <ul>
+                    {% for item in context["items"] %}
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                        <li>{{ item["name"] }} - ${{ item["price"] }}</li>
+                    {% empty %}
+        [5 lines skipped]
+        ```
+        """
+
+        template_before_token = token.template[: token.start_position]
+        if skipped_lines := template_before_token.count("\n") - lines_around:
+            template_before_token = (
+                f"{cls._skipped_lines_message(skipped_lines)}\n"
+                + "\n".join(template_before_token.split("\n")[-(lines_around + 1) :])
+            )
+
+        template_after_token = token.template[token.end_position :]
+        if skipped_lines := template_after_token.count("\n") - lines_around:
+            template_after_token = (
+                "\n".join(template_after_token.split("\n")[: (lines_around + 1)])
+                + f"\n{cls._skipped_lines_message(skipped_lines)}"
+            )
+
+        lines_before_line_with_token = template_before_token.rsplit("\n", 1)[0]
+
+        line_with_token = (
+            template_before_token.rsplit("\n", 1)[-1]
+            + token.content
+            + template_after_token.split("\n")[0]
+        )
+
+        line_with_underline = (
+            " " * len(template_before_token.rsplit("\n", 1)[-1])
+            + symbol * len(token.content)
+            + " " * len(template_after_token.split("\n")[0])
+        )
+
+        lines_after_line_with_token = template_after_token.split("\n", 1)[-1]
+
+        return "\n".join(
+            [
+                lines_before_line_with_token,
+                line_with_token,
+                line_with_underline,
+                lines_after_line_with_token,
+            ]
+        )
 
 
 def safe_html(value: Any) -> str:
@@ -111,59 +186,6 @@ def safe_html(value: Any) -> str:
     )
 
 
-def safe_xml(value: Any) -> str:
-    """
-    Encodes unsafe symbols in ``value`` to XML entities and returns the string that can be safely
-    used in XML.
-
-    Example::
-
-        safe_xml('<a href="https://circuitpython.org/">CircuitPython</a>')
-        # &lt;a href=&quot;https://circuitpython.org/&quot;&gt;CircuitPython&lt;/a&gt;
-    """
-
-    return (
-        str(value)
-        .replace("&", "&amp;")
-        .replace('"', "&quot;")
-        .replace("'", "&apos;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-    )
-
-
-def safe_markdown(value: Any) -> str:
-    """
-    Encodes unsafe symbols in ``value`` and returns the string that can be safely used in Markdown.
-
-    Example::
-
-        safe_markdown('[CircuitPython](https://circuitpython.org/)')
-        # \\[CircuitPython\\]\\(https://circuitpython.org/\\)
-    """
-
-    return (
-        str(value)
-        .replace("_", "\\_")
-        .replace("-", "\\-")
-        .replace("!", "\\!")
-        .replace("(", "\\(")
-        .replace(")", "\\)")
-        .replace("[", "\\[")
-        .replace("]", "\\]")
-        .replace("*", "\\*")
-        .replace("*", "\\*")
-        .replace("&", "\\&")
-        .replace("#", "\\#")
-        .replace("`", "\\`")
-        .replace("+", "\\+")
-        .replace("<", "\\<")
-        .replace(">", "\\>")
-        .replace("|", "\\|")
-        .replace("~", "\\~")
-    )
-
-
 _EXTENDS_PATTERN = re.compile(r"{% extends '.+?' %}|{% extends \".+?\" %}")
 _BLOCK_PATTERN = re.compile(r"{% block \w+? %}")
 _INCLUDE_PATTERN = re.compile(r"{% include '.+?' %}|{% include \".+?\" %}")
@@ -183,12 +205,32 @@ def _find_block(template: str):
     return _BLOCK_PATTERN.search(template)
 
 
+def _find_any_non_whitespace(template: str):
+    return re.search(r"\S+", template)
+
+
+def _find_endblock(template: str, name: str = r"\w+?"):
+    return re.search(r"{% endblock " + name + r" %}", template)
+
+
 def _find_include(template: str):
     return _INCLUDE_PATTERN.search(template)
 
 
-def _find_named_endblock(template: str, name: str):
-    return re.search(r"{% endblock " + name + r" %}", template)
+def _find_hash_comment(template: str):
+    return _HASH_COMMENT_PATTERN.search(template)
+
+
+def _find_block_comment(template: str):
+    return _BLOCK_COMMENT_PATTERN.search(template)
+
+
+def _find_token(template: str):
+    return _TOKEN_PATTERN.search(template)
+
+
+def _token_is_on_own_line(text_before_token: str) -> bool:
+    return _LSTRIP_BLOCK_PATTERN.search(text_before_token) is not None
 
 
 def _exists_and_is_file(path: str) -> bool:
@@ -205,7 +247,7 @@ def _resolve_includes(template: str):
         # TODO: Restrict include to specific directory
 
         if not _exists_and_is_file(template_path):
-            raise OSError(f"Include template not found: {template_path}")
+            raise TemplateNotFoundError(template_path)
 
         # Replace the include with the template content
         with open(template_path, "rt", encoding="utf-8") as template_file:
@@ -217,42 +259,94 @@ def _resolve_includes(template: str):
     return template
 
 
-def _check_for_unsupported_nested_blocks(template: str):
-    if _find_block(template) is not None:
-        raise SyntaxError("Nested blocks are not supported")
-
-
-def _resolve_includes_blocks_and_extends(template: str):
+def _resolve_includes_blocks_and_extends(  # pylint: disable=,too-many-locals
+    template: str,
+):
+    extended_templates: "set[str]" = set()
     block_replacements: "dict[str, str]" = {}
 
     # Processing nested child templates
     while (extends_match := _find_extends(template)) is not None:
-        extended_template_name = extends_match.group(0)[12:-4]
+        extended_template_path = extends_match.group(0)[12:-4]
+
+        if not _exists_and_is_file(extended_template_path):
+            raise TemplateNotFoundError(extended_template_path)
+
+        # Check for circular extends
+        if extended_template_path in extended_templates:
+            raise TemplateSyntaxError(
+                Token(
+                    template,
+                    extends_match.start(),
+                    extends_match.end(),
+                ),
+                "Circular extends",
+            )
 
         # Load extended template
+        extended_templates.add(extended_template_path)
         with open(
-            extended_template_name, "rt", encoding="utf-8"
+            extended_template_path, "rt", encoding="utf-8"
         ) as extended_template_file:
             extended_template = extended_template_file.read()
 
-        # Removed the extend tag
-        template = template[extends_match.end() :]
+        offset = extends_match.end()
 
         # Resolve includes
         template = _resolve_includes(template)
 
+        # Check for any stacked extends
+        if stacked_extends_match := _find_extends(template[extends_match.end() :]):
+            raise TemplateSyntaxError(
+                Token(
+                    template,
+                    extends_match.end() + stacked_extends_match.start(),
+                    extends_match.end() + stacked_extends_match.end(),
+                ),
+                "Incorrect use of {% extends ... %}",
+            )
+
         # Save block replacements
-        while (block_match := _find_block(template)) is not None:
+        while (block_match := _find_block(template[offset:])) is not None:
             block_name = block_match.group(0)[9:-3]
 
-            endblock_match = _find_named_endblock(template, block_name)
+            # Check for anything between blocks
+            if content_between_blocks := _find_any_non_whitespace(
+                template[offset : offset + block_match.start()]
+            ):
+                raise TemplateSyntaxError(
+                    Token(
+                        template,
+                        offset + content_between_blocks.start(),
+                        offset + content_between_blocks.end(),
+                    ),
+                    "Content outside block",
+                )
 
-            if endblock_match is None:
-                raise SyntaxError("Missing {% endblock %} for block: " + block_name)
+            if not (endblock_match := _find_endblock(template[offset:], block_name)):
+                raise TemplateSyntaxError(
+                    Token(
+                        template,
+                        offset + block_match.start(),
+                        offset + block_match.end(),
+                    ),
+                    "No matching {% endblock %}",
+                )
 
-            block_content = template[block_match.end() : endblock_match.start()]
+            block_content = template[
+                offset + block_match.end() : offset + endblock_match.start()
+            ]
 
-            _check_for_unsupported_nested_blocks(block_content)
+            # Check for unsupported nested blocks
+            if (nested_block_match := _find_block(block_content)) is not None:
+                raise TemplateSyntaxError(
+                    Token(
+                        template,
+                        offset + block_match.end() + nested_block_match.start(),
+                        offset + block_match.end() + nested_block_match.end(),
+                    ),
+                    "Nested blocks are not supported",
+                )
 
             if block_name in block_replacements:
                 block_replacements[block_name] = block_replacements[block_name].replace(
@@ -261,8 +355,16 @@ def _resolve_includes_blocks_and_extends(template: str):
             else:
                 block_replacements.setdefault(block_name, block_content)
 
-            template = (
-                template[: block_match.start()] + template[endblock_match.end() :]
+            offset += endblock_match.end()
+
+        if content_after_last_endblock := _find_any_non_whitespace(template[offset:]):
+            raise TemplateSyntaxError(
+                Token(
+                    template,
+                    offset + content_after_last_endblock.start(),
+                    offset + content_after_last_endblock.end(),
+                ),
+                "Content outside block",
             )
 
         template = extended_template
@@ -279,7 +381,7 @@ def _replace_blocks_with_replacements(template: str, replacements: "dict[str, st
         block_name = block_match.group(0)[9:-3]
 
         # Self-closing block tag without default content
-        if (endblock_match := _find_named_endblock(template, block_name)) is None:
+        if (endblock_match := _find_endblock(template, block_name)) is None:
             replacement = replacements.get(block_name, "")
 
             template = (
@@ -292,7 +394,16 @@ def _replace_blocks_with_replacements(template: str, replacements: "dict[str, st
         else:
             block_content = template[block_match.end() : endblock_match.start()]
 
-            _check_for_unsupported_nested_blocks(block_content)
+            # Check for unsupported nested blocks
+            if (nested_block_match := _find_block(block_content)) is not None:
+                raise TemplateSyntaxError(
+                    Token(
+                        template,
+                        block_match.end() + nested_block_match.start(),
+                        block_match.end() + nested_block_match.end(),
+                    ),
+                    "Nested blocks are not supported",
+                )
 
             # No replacement for this block, use default content
             if block_name not in replacements:
@@ -315,14 +426,6 @@ def _replace_blocks_with_replacements(template: str, replacements: "dict[str, st
                 )
 
     return template
-
-
-def _find_hash_comment(template: str):
-    return _HASH_COMMENT_PATTERN.search(template)
-
-
-def _find_block_comment(template: str):
-    return _BLOCK_COMMENT_PATTERN.search(template)
 
 
 def _remove_comments(
@@ -358,17 +461,8 @@ def _remove_comments(
     return template
 
 
-def _find_token(template: str):
-    return _TOKEN_PATTERN.search(template)
-
-
-def _token_is_on_own_line(text_before_token: str) -> bool:
-    return _LSTRIP_BLOCK_PATTERN.search(text_before_token) is not None
-
-
 def _create_template_rendering_function(  # pylint: disable=,too-many-locals,too-many-branches,too-many-statements
     template: str,
-    language: str = Language.HTML,
     *,
     trim_blocks: bool = True,
     lstrip_blocks: bool = True,
@@ -387,19 +481,24 @@ def _create_template_rendering_function(  # pylint: disable=,too-many-locals,too
     indent, indentation_level = "    ", 1
 
     # Keep track of the template state
-    nested_if_statements: "list[str]" = []
-    nested_for_loops: "list[str]" = []
-    nested_while_loops: "list[str]" = []
-    nested_autoescape_modes: "list[str]" = []
+    nested_if_statements: "list[Token]" = []
+    nested_for_loops: "list[Token]" = []
+    nested_while_loops: "list[Token]" = []
+    nested_autoescape_modes: "list[Token]" = []
     last_token_was_block = False
+    offset = 0
 
     # Resolve tokens
-    while (token_match := _find_token(template)) is not None:
-        token = token_match.group(0)
+    while (token_match := _find_token(template[offset:])) is not None:
+        token = Token(
+            template,
+            offset + token_match.start(),
+            offset + token_match.end(),
+        )
 
         # Add the text before the token
-        if text_before_token := template[: token_match.start()]:
-            if lstrip_blocks and token.startswith(r"{% "):
+        if text_before_token := template[offset : offset + token_match.start()]:
+            if lstrip_blocks and token.content.startswith(r"{% "):
                 if _token_is_on_own_line(text_before_token):
                     text_before_token = text_before_token.rstrip(" ")
 
@@ -415,137 +514,156 @@ def _create_template_rendering_function(  # pylint: disable=,too-many-locals,too
             function_string += indent * indentation_level + "pass\n"
 
         # Token is an expression
-        if token.startswith(r"{{ "):
+        if token.content.startswith(r"{{ "):
             last_token_was_block = False
 
             if nested_autoescape_modes:
-                autoescape = nested_autoescape_modes[-1][14:-3] == "on"
+                autoescape = nested_autoescape_modes[-1].content[14:-3] == "on"
             else:
                 autoescape = True
 
-            # Expression should be escaped with language-specific function
+            # Expression should be escaped
             if autoescape:
                 function_string += (
                     indent * indentation_level
-                    + f"yield safe_{language.lower()}({token[3:-3]})\n"
+                    + f"yield safe_html({token.content[3:-3]})\n"
                 )
             # Expression should not be escaped
             else:
                 function_string += (
-                    indent * indentation_level + f"yield str({token[3:-3]})\n"
+                    indent * indentation_level + f"yield str({token.content[3:-3]})\n"
                 )
 
         # Token is a statement
-        elif token.startswith(r"{% "):
+        elif token.content.startswith(r"{% "):
             last_token_was_block = True
 
             # Token is a some sort of if statement
-            if token.startswith(r"{% if "):
-                function_string += indent * indentation_level + f"{token[3:-3]}:\n"
+            if token.content.startswith(r"{% if "):
+                function_string += (
+                    indent * indentation_level + f"{token.content[3:-3]}:\n"
+                )
                 indentation_level += 1
 
                 nested_if_statements.append(token)
-            elif token.startswith(r"{% elif "):
+            elif token.content.startswith(r"{% elif "):
+                if not nested_if_statements:
+                    raise TemplateSyntaxError(token, "No matching {% if ... %}")
+
                 indentation_level -= 1
-                function_string += indent * indentation_level + f"{token[3:-3]}:\n"
+                function_string += (
+                    indent * indentation_level + f"{token.content[3:-3]}:\n"
+                )
                 indentation_level += 1
-            elif token == r"{% else %}":
+            elif token.content == r"{% else %}":
+                if not nested_if_statements:
+                    raise TemplateSyntaxError(token, "No matching {% if ... %}")
+
                 indentation_level -= 1
                 function_string += indent * indentation_level + "else:\n"
                 indentation_level += 1
-            elif token == r"{% endif %}":
-                indentation_level -= 1
-
+            elif token.content == r"{% endif %}":
                 if not nested_if_statements:
-                    raise SyntaxError("Missing {% if ... %} block for {% endif %}")
+                    raise TemplateSyntaxError(token, "No matching {% if ... %}")
 
+                indentation_level -= 1
                 nested_if_statements.pop()
 
             # Token is a for loop
-            elif token.startswith(r"{% for "):
-                function_string += indent * indentation_level + f"{token[3:-3]}:\n"
+            elif token.content.startswith(r"{% for "):
+                function_string += (
+                    indent * indentation_level + f"{token.content[3:-3]}:\n"
+                )
                 indentation_level += 1
 
                 nested_for_loops.append(token)
-            elif token == r"{% empty %}":
-                indentation_level -= 1
-                last_forloop_iterable = nested_for_loops[-1][3:-3].split(" in ", 1)[1]
+            elif token.content == r"{% empty %}":
+                if not nested_for_loops:
+                    raise TemplateSyntaxError(token, "No matching {% for ... %}")
 
+                indentation_level -= 1
+                last_forloop_iterable = (
+                    nested_for_loops[-1].content[3:-3].split(" in ", 1)[1]
+                )
                 function_string += (
                     indent * indentation_level + f"if not {last_forloop_iterable}:\n"
                 )
                 indentation_level += 1
-            elif token == r"{% endfor %}":
-                indentation_level -= 1
-
+            elif token.content == r"{% endfor %}":
                 if not nested_for_loops:
-                    raise SyntaxError("Missing {% for ... %} block for {% endfor %}")
+                    raise TemplateSyntaxError(token, "No matching {% for ... %}")
 
+                indentation_level -= 1
                 nested_for_loops.pop()
 
             # Token is a while loop
-            elif token.startswith(r"{% while "):
-                function_string += indent * indentation_level + f"{token[3:-3]}:\n"
+            elif token.content.startswith(r"{% while "):
+                function_string += (
+                    indent * indentation_level + f"{token.content[3:-3]}:\n"
+                )
                 indentation_level += 1
 
                 nested_while_loops.append(token)
-            elif token == r"{% endwhile %}":
-                indentation_level -= 1
-
+            elif token.content == r"{% endwhile %}":
                 if not nested_while_loops:
-                    raise SyntaxError(
-                        "Missing {% while ... %} block for {% endwhile %}"
-                    )
+                    raise TemplateSyntaxError(token, "No matching {% while ... %}")
 
+                indentation_level -= 1
                 nested_while_loops.pop()
 
             # Token is a Python code
-            elif token.startswith(r"{% exec "):
-                expression = token[8:-3]
+            elif token.content.startswith(r"{% exec "):
+                expression = token.content[8:-3]
                 function_string += indent * indentation_level + f"{expression}\n"
 
-            # Token is autoescape mode change
-            elif token.startswith(r"{% autoescape "):
-                mode = token[14:-3]
+            # Token is a autoescape mode change
+            elif token.content.startswith(r"{% autoescape "):
+                mode = token.content[14:-3]
                 if mode not in ("on", "off"):
                     raise ValueError(f"Unknown autoescape mode: {mode}")
 
                 nested_autoescape_modes.append(token)
 
-            elif token == r"{% endautoescape %}":
+            elif token.content == r"{% endautoescape %}":
                 if not nested_autoescape_modes:
-                    raise SyntaxError(
-                        "Missing {% autoescape ... %} block for {% endautoescape %}"
-                    )
+                    raise TemplateSyntaxError(token, "No matching {% autoescape ... %}")
 
                 nested_autoescape_modes.pop()
 
+            # Token is a endblock in top-level template
+            elif token.content.startswith(r"{% endblock "):
+                raise TemplateSyntaxError(token, "No matching {% block ... %}")
+
+            # Token is a extends in top-level template
+            elif token.content.startswith(r"{% extends "):
+                raise TemplateSyntaxError(token, "Incorrect use of {% extends ... %}")
+
             else:
-                raise SyntaxError(f"Unknown token type: {token}")
+                raise TemplateSyntaxError(token, f"Unknown token: {token.content}")
 
         else:
-            raise SyntaxError(f"Unknown token type: {token}")
+            raise TemplateSyntaxError(token, f"Unknown token: {token.content}")
 
-        # Continue with the rest of the template
-        template = template[token_match.end() :]
+        # Move offset to the end of the token
+        offset += token_match.end()
 
     # Checking for unclosed blocks
     if len(nested_if_statements) > 0:
         last_if_statement = nested_if_statements[-1]
-        raise SyntaxError("Missing {% endif %} for " + last_if_statement)
+        raise TemplateSyntaxError(last_if_statement, "No matching {% endif %}")
 
     if len(nested_for_loops) > 0:
         last_for_loop = nested_for_loops[-1]
-        raise SyntaxError("Missing {% endfor %} for " + last_for_loop)
+        raise TemplateSyntaxError(last_for_loop, "No matching {% endfor %}")
 
     if len(nested_while_loops) > 0:
         last_while_loop = nested_while_loops[-1]
-        raise SyntaxError("Missing {% endwhile %} for " + last_while_loop)
+        raise TemplateSyntaxError(last_while_loop, "No matching {% endwhile %}")
 
     # No check for unclosed autoescape blocks, as they are optional and do not result in errors
 
     # Add the text after the last token (if any)
-    text_after_last_token = template
+    text_after_last_token = template[offset:]
 
     if text_after_last_token:
         if trim_blocks and text_after_last_token.startswith("\n"):
@@ -590,22 +708,13 @@ class Template:
 
     _template_function: "Generator[str]"
 
-    def __init__(self, template_string: str, *, language: str = Language.HTML) -> None:
+    def __init__(self, template_string: str) -> None:
         """
         Creates a reusable template from the given template string.
 
-        For better performance, instantiate the template in global scope and reuse it as many times.
-        If memory is a concern, instantiate the template in a function or method that uses it.
-
-        By default, the template is rendered as HTML. To render it as XML or Markdown, use the
-        ``language`` parameter.
-
         :param str template_string: String containing the template to be rendered
-        :param str language: Language for autoescaping. Defaults to HTML
         """
-        self._template_function = _create_template_rendering_function(
-            template_string, language
-        )
+        self._template_function = _create_template_rendering_function(template_string)
 
     def render_iter(
         self, context: dict = None, *, chunk_size: int = None
@@ -655,22 +764,22 @@ class FileTemplate(Template):
     Class that loads a template from a file and allows to rendering it with different contexts.
     """
 
-    def __init__(self, template_path: str, *, language: str = Language.HTML) -> None:
+    def __init__(self, template_path: str) -> None:
         """
         Loads a file and creates a reusable template from its contents.
 
-        For better performance, instantiate the template in global scope and reuse it as many times.
-        If memory is a concern, instantiate the template in a function or method that uses it.
-
-        By default, the template is rendered as HTML. To render it as XML or Markdown, use the
-        ``language`` parameter.
-
         :param str template_path: Path to a file containing the template to be rendered
-        :param str language: Language for autoescaping. Defaults to HTML
         """
+
+        if not _exists_and_is_file(template_path):
+            raise TemplateNotFoundError(template_path)
+
         with open(template_path, "rt", encoding="utf-8") as template_file:
             template_string = template_file.read()
-        super().__init__(template_string, language=language)
+        super().__init__(template_string)
+
+
+_CACHE: "dict[int, Template| FileTemplate]" = {}
 
 
 def render_string_iter(
@@ -678,16 +787,19 @@ def render_string_iter(
     context: dict = None,
     *,
     chunk_size: int = None,
-    language: str = Language.HTML,
+    cache: bool = True,
 ):
     """
     Creates a `Template` from the given ``template_string`` and renders it using the provided
     ``context``. Returns a generator that yields the rendered output.
 
+    If ``cache`` is ``True``, the template is saved and reused on next calls, even with different
+    contexts.
+
     :param dict context: Dictionary containing the context for the template
     :param int chunk_size: Size of the chunks to be yielded. If ``None``, the generator yields
         the template in chunks sized specifically for the given template
-    :param str language: Language for autoescaping. Defaults to HTML
+    :param bool cache: When ``True``, the template is saved and reused on next calls.
 
     Example::
 
@@ -697,8 +809,20 @@ def render_string_iter(
         list(render_string_iter(r"Hello {{ name }}!", {"name": "CircuitPython"}, chunk_size=3))
         # ['Hel', 'lo ', 'Cir', 'cui', 'tPy', 'tho', 'n!']
     """
-    return Template(template_string, language=language).render_iter(
-        context or {}, chunk_size=chunk_size
+    key = hash(template_string)
+
+    if cache and key in _CACHE:
+        return _yield_as_sized_chunks(
+            _CACHE[key].render_iter(context or {}, chunk_size), chunk_size
+        )
+
+    template = Template(template_string)
+
+    if cache:
+        _CACHE[key] = template
+
+    return _yield_as_sized_chunks(
+        template.render_iter(context or {}), chunk_size=chunk_size
     )
 
 
@@ -706,21 +830,34 @@ def render_string(
     template_string: str,
     context: dict = None,
     *,
-    language: str = Language.HTML,
+    cache: bool = True,
 ):
     """
     Creates a `Template` from the given ``template_string`` and renders it using the provided
     ``context``. Returns the rendered output as a string.
 
+    If ``cache`` is ``True``, the template is saved and reused on next calls, even with different
+    contexts.
+
     :param dict context: Dictionary containing the context for the template
-    :param str language: Language for autoescaping. Defaults to HTML
+    :param bool cache: When ``True``, the template is saved and reused on next calls.
 
     Example::
 
         render_string(r"Hello {{ name }}!", {"name": "World"})
         # 'Hello World!'
     """
-    return Template(template_string, language=language).render(context or {})
+    key = hash(template_string)
+
+    if cache and key in _CACHE:
+        return _CACHE[key].render(context or {})
+
+    template = Template(template_string)
+
+    if cache:
+        _CACHE[key] = template
+
+    return template.render(context or {})
 
 
 def render_template_iter(
@@ -728,16 +865,19 @@ def render_template_iter(
     context: dict = None,
     *,
     chunk_size: int = None,
-    language: str = Language.HTML,
+    cache: bool = True,
 ):
     """
     Creates a `FileTemplate` from the given ``template_path`` and renders it using the provided
     ``context``. Returns a generator that yields the rendered output.
 
+    If ``cache`` is ``True``, the template is saved and reused on next calls, even with different
+    contexts.
+
     :param dict context: Dictionary containing the context for the template
     :param int chunk_size: Size of the chunks to be yielded. If ``None``, the generator yields
         the template in chunks sized specifically for the given template
-    :param str language: Language for autoescaping. Defaults to HTML
+    :param bool cache: When ``True``, the template is saved and reused on next calls.
 
     Example::
 
@@ -747,8 +887,20 @@ def render_template_iter(
         list(render_template_iter(..., {"name": "CircuitPython"}, chunk_size=3))
         # ['Hel', 'lo ', 'Cir', 'cui', 'tPy', 'tho', 'n!']
     """
-    return FileTemplate(template_path, language=language).render_iter(
-        context or {}, chunk_size=chunk_size
+    key = hash(template_path)
+
+    if cache and key in _CACHE:
+        return _yield_as_sized_chunks(
+            _CACHE[key].render_iter(context or {}, chunk_size), chunk_size
+        )
+
+    template = FileTemplate(template_path)
+
+    if cache:
+        _CACHE[key] = template
+
+    return _yield_as_sized_chunks(
+        template.render_iter(context or {}, chunk_size=chunk_size), chunk_size
     )
 
 
@@ -756,18 +908,32 @@ def render_template(
     template_path: str,
     context: dict = None,
     *,
-    language: str = Language.HTML,
+    cache: bool = True,
 ):
     """
     Creates a `FileTemplate` from the given ``template_path`` and renders it using the provided
     ``context``. Returns the rendered output as a string.
 
+    If ``cache`` is ``True``, the template is saved and reused on next calls, even with different
+    contexts.
+
     :param dict context: Dictionary containing the context for the template
-    :param str language: Language for autoescaping. Defaults to HTML
+    :param bool cache: When ``True``, the template is saved and reused on next calls.
 
     Example::
 
         render_template(..., {"name": "World"}) # r"Hello {{ name }}!"
         # 'Hello World!'
     """
-    return FileTemplate(template_path, language=language).render(context or {})
+
+    key = hash(template_path)
+
+    if cache and key in _CACHE:
+        return _CACHE[key].render(context or {})
+
+    template = FileTemplate(template_path)
+
+    if cache:
+        _CACHE[key] = template
+
+    return template.render(context or {})

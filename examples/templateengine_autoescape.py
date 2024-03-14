@@ -2,12 +2,7 @@
 #
 # SPDX-License-Identifier: Unlicense
 
-from adafruit_templateengine import render_template, Language
+from adafruit_templateengine import render_template
 
-# By default autoescape is enabled for HTML
-print("HTML autoescape:")
+# By default autoescape is enabled for HTML entities
 print(render_template("./examples/autoescape.html"))
-
-# But XML and Markdown are also supported
-print("Markdown autoescape:")
-print(render_template("./examples/autoescape.md", language=Language.MARKDOWN))
