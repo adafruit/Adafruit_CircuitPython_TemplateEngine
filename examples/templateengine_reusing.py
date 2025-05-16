@@ -4,7 +4,6 @@
 
 from adafruit_templateengine import Template, render_string
 
-
 template_string = r"""
 <!DOCTYPE html>
 <html>

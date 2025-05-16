@@ -42,7 +42,7 @@ finally:
     del implementation
 
 
-class Token:  # pylint: disable=too-few-public-methods
+class Token:
     """Stores a token with its position in a template."""
 
     def __init__(self, template: str, start_position: int, end_position: int):
@@ -99,26 +99,16 @@ class TemplateSyntaxError(SyntaxError):
             )
 
             if 0 < top_skipped_lines:
-                top_skipped_lines_message = cls._skipped_lines_message(
-                    top_skipped_lines
-                )
-                template_before_token = (
-                    f"{top_skipped_lines_message}\n{template_before_token}"
-                )
+                top_skipped_lines_message = cls._skipped_lines_message(top_skipped_lines)
+                template_before_token = f"{top_skipped_lines_message}\n{template_before_token}"
 
         template_after_token = token.template[token.end_position :]
         if bottom_skipped_lines := template_after_token.count("\n") - lines_around:
-            template_after_token = "\n".join(
-                template_after_token.split("\n")[: (lines_around + 1)]
-            )
+            template_after_token = "\n".join(template_after_token.split("\n")[: (lines_around + 1)])
 
             if 0 < bottom_skipped_lines:
-                bottom_skipped_lines_message = cls._skipped_lines_message(
-                    bottom_skipped_lines
-                )
-                template_after_token = (
-                    f"{template_after_token}\n{bottom_skipped_lines_message}"
-                )
+                bottom_skipped_lines_message = cls._skipped_lines_message(bottom_skipped_lines)
+                template_after_token = f"{template_after_token}\n{bottom_skipped_lines_message}"
 
         lines_before_line_with_token = template_before_token.rsplit("\n", 1)[0]
 
@@ -204,9 +194,7 @@ _EXTENDS_PATTERN = re.compile(r"{% extends '.+?' %}|{% extends \".+?\" %}")
 _BLOCK_PATTERN = re.compile(r"{% block \w+? %}")
 _INCLUDE_PATTERN = re.compile(r"{% include '.+?' %}|{% include \".+?\" %}")
 _HASH_COMMENT_PATTERN = re.compile(r"{# .+? #}")
-_BLOCK_COMMENT_PATTERN = re.compile(
-    r"{% comment ('.*?' |\".*?\" )?%}[\s\S]*?{% endcomment %}"
-)
+_BLOCK_COMMENT_PATTERN = re.compile(r"{% comment ('.*?' |\".*?\" )?%}[\s\S]*?{% endcomment %}")
 _TOKEN_PATTERN = re.compile(r"{{ .+? }}|{% .+? %}")
 _LSTRIP_BLOCK_PATTERN = re.compile(r"\n +$")
 _YIELD_PATTERN = re.compile(r"\n +yield ")
@@ -269,7 +257,7 @@ def _resolve_includes(template: str):
             raise TemplateNotFoundError(template_path)
 
         # Replace the include with the template content
-        with open(template_path, "rt", encoding="utf-8") as template_file:
+        with open(template_path, encoding="utf-8") as template_file:
             template = (
                 template[: include_match.start()]
                 + template_file.read()
@@ -278,7 +266,7 @@ def _resolve_includes(template: str):
     return template
 
 
-def _resolve_includes_blocks_and_extends(  # pylint: disable=,too-many-locals
+def _resolve_includes_blocks_and_extends(
     template: str,
 ):
     extended_templates: "set[str]" = set()
@@ -304,9 +292,7 @@ def _resolve_includes_blocks_and_extends(  # pylint: disable=,too-many-locals
 
         # Load extended template
         extended_templates.add(extended_template_path)
-        with open(
-            extended_template_path, "rt", encoding="utf-8"
-        ) as extended_template_file:
+        with open(extended_template_path, encoding="utf-8") as extended_template_file:
             extended_template = extended_template_file.read()
 
         offset = extends_match.end()
@@ -352,9 +338,7 @@ def _resolve_includes_blocks_and_extends(  # pylint: disable=,too-many-locals
                     "No matching {% endblock %}",
                 )
 
-            block_content = template[
-                offset + block_match.end() : offset + endblock_match.start()
-            ]
+            block_content = template[offset + block_match.end() : offset + endblock_match.start()]
 
             # Check for unsupported nested blocks
             if (nested_block_match := _find_block(block_content)) is not None:
@@ -403,11 +387,7 @@ def _replace_blocks_with_replacements(template: str, replacements: "dict[str, st
         if (endblock_match := _find_endblock(template, block_name)) is None:
             replacement = replacements.get(block_name, "")
 
-            template = (
-                template[: block_match.start()]
-                + replacement
-                + template[block_match.end() :]
-            )
+            template = template[: block_match.start()] + replacement + template[block_match.end() :]
 
         # Block with default content
         else:
@@ -434,14 +414,10 @@ def _replace_blocks_with_replacements(template: str, replacements: "dict[str, st
 
             # Replace default content with replacement
             else:
-                replacement = replacements[block_name].replace(
-                    r"{{ block.super }}", block_content
-                )
+                replacement = replacements[block_name].replace(r"{{ block.super }}", block_content)
 
                 template = (
-                    template[: block_match.start()]
-                    + replacement
-                    + template[endblock_match.end() :]
+                    template[: block_match.start()] + replacement + template[endblock_match.end() :]
                 )
 
     return template
@@ -480,7 +456,7 @@ def _remove_comments(
     return template
 
 
-def _create_template_rendering_function(  # pylint: disable=,too-many-locals,too-many-branches,too-many-statements
+def _create_template_rendering_function(
     template: str,
     *,
     trim_blocks: bool = True,
@@ -590,9 +566,7 @@ def _create_template_rendering_function(  # pylint: disable=,too-many-locals,too
                 if not nested_for_loops:
                     raise TemplateSyntaxError(token, "No matching {% for ... %}")
 
-                last_forloop_iterable = (
-                    nested_for_loops[-1].content[3:-3].split(" in ", 1)[1]
-                )
+                last_forloop_iterable = nested_for_loops[-1].content[3:-3].split(" in ", 1)[1]
 
                 indent_level -= 1
                 function_def += indented(f"if not {last_forloop_iterable}:")
@@ -624,7 +598,7 @@ def _create_template_rendering_function(  # pylint: disable=,too-many-locals,too
             # Token is a autoescape mode change
             elif token.content.startswith(r"{% autoescape "):
                 mode = token.content[14:-3]
-                if mode not in ("on", "off"):
+                if mode not in {"on", "off"}:
                     raise ValueError(f"Unknown autoescape mode: {mode}")
 
                 nested_autoescape_modes.append(token)
@@ -681,13 +655,11 @@ def _create_template_rendering_function(  # pylint: disable=,too-many-locals,too
         function_def += indented('yield ""')
 
     # Create and return the template function
-    exec(function_def)  # pylint: disable=exec-used
+    exec(function_def)
     return locals()[function_name]
 
 
-def _yield_as_sized_chunks(
-    generator: "Generator[str]", chunk_size: int
-) -> "Generator[str]":
+def _yield_as_sized_chunks(generator: "Generator[str]", chunk_size: int) -> "Generator[str]":
     """Yields resized chunks from the ``generator``."""
 
     # Yield chunks with a given size
@@ -722,9 +694,7 @@ class Template:
         """
         self._template_function = _create_template_rendering_function(template_string)
 
-    def render_iter(
-        self, context: dict = None, *, chunk_size: int = None
-    ) -> "Generator[str]":
+    def render_iter(self, context: dict = None, *, chunk_size: int = None) -> "Generator[str]":
         """
         Renders the template using the provided context and returns a generator that yields the
         rendered output.
@@ -780,7 +750,7 @@ class FileTemplate(Template):
         if not _exists_and_is_file(template_path):
             raise TemplateNotFoundError(template_path)
 
-        with open(template_path, "rt", encoding="utf-8") as template_file:
+        with open(template_path, encoding="utf-8") as template_file:
             template_string = template_file.read()
         super().__init__(template_string)
 
