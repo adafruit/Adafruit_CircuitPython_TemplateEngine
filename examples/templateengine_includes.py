@@ -4,5 +4,4 @@
 
 from adafruit_templateengine import render_template
 
-
 print(render_template("./examples/base_without_footer.html"))
