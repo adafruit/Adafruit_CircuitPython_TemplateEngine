@@ -655,8 +655,10 @@ def _create_template_rendering_function(
         function_def += indented('yield ""')
 
     # Create and return the template function
-    exec(function_def)
-    return locals()[function_name]
+    _globals = {"safe_html": safe_html}
+    _locals = {}
+    exec(function_def, _globals, _locals)
+    return _locals[function_name]
 
 
 def _yield_as_sized_chunks(generator: "Generator[str]", chunk_size: int) -> "Generator[str]":
