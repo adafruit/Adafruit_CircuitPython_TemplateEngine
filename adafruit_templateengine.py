@@ -269,8 +269,8 @@ def _resolve_includes(template: str):
 def _resolve_includes_blocks_and_extends(
     template: str,
 ):
-    extended_templates: "set[str]" = set()
-    block_replacements: "dict[str, str]" = {}
+    extended_templates: set[str] = set()
+    block_replacements: dict[str, str] = {}
 
     # Processing nested child templates
     while (extends_match := _find_extends(template)) is not None:
@@ -479,10 +479,10 @@ def _create_template_rendering_function(
         return "    " * indent_level + fragment + end
 
     # Keep track of the template state
-    nested_if_statements: "list[Token]" = []
-    nested_for_loops: "list[Token]" = []
-    nested_while_loops: "list[Token]" = []
-    nested_autoescape_modes: "list[Token]" = []
+    nested_if_statements: list[Token] = []
+    nested_for_loops: list[Token] = []
+    nested_while_loops: list[Token] = []
+    nested_autoescape_modes: list[Token] = []
     last_token_was_block = False
     offset = 0
 
