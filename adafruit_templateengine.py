@@ -523,7 +523,7 @@ def _create_template_rendering_function(
                 function_def += indented(f"yield safe_html({token.content[3:-3]})")
             # Expression should not be escaped
             else:
-                function_def += indented(f"yield {token.content[3:-3]}")
+                function_def += indented(f"yield str({token.content[3:-3]})")
 
         # Token is a statement
         elif token.content.startswith(r"{% "):
